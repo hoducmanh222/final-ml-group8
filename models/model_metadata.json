@@ -1,0 +1,9 @@
+{
+  "best_model": "Ensemble_Final",
+  "test_rmse": 0.968978251245734,
+  "test_mae": 0.7717256416350088,
+  "test_r2": 0.6226810944214529,
+  "train_date": "2025-11-11T23:21:32.567582",
+  "train_samples": 3308,
+  "test_samples": 570
+}
