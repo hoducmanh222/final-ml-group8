@@ -11,7 +11,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta
-import pickle
 import sys
 from pathlib import Path
 import warnings
@@ -171,15 +170,9 @@ def load_model():
             st.info("Please train the model first: python scripts/train_models.py")
             return None
         
-        # Try multiple pickle libraries
-        with open(model_path, 'rb') as f:
-            try:
-                import cloudpickle
-                model_data = cloudpickle.load(f)
-            except ImportError:
-                # Fallback to standard pickle
-                import pickle as pkl
-                model_data = pkl.load(f)
+        # Use joblib for better cross-version compatibility
+        import joblib
+        model_data = joblib.load(model_path)
         return model_data
     except Exception as e:
         st.error(f"Error loading model: {e}")
