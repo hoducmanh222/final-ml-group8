@@ -15,6 +15,11 @@ def to_dense(x):
     return x.toarray() if hasattr(x, 'toarray') else x
 
 
+def flatten_array(x):
+    """Flatten array for text processing."""
+    return x.ravel()
+
+
 def build_preprocessor(numeric_cols, categorical_cols, text_cols):
     """
     Build sklearn ColumnTransformer for preprocessing.
@@ -52,7 +57,7 @@ def build_preprocessor(numeric_cols, categorical_cols, text_cols):
     if text_cols:
         text_transformer = Pipeline([
             ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-            ('flatten', FunctionTransformer(lambda x: x.ravel(), accept_sparse=False)),
+            ('flatten', FunctionTransformer(flatten_array, accept_sparse=False)),
             ('tfidf', TfidfVectorizer(max_features=100, ngram_range=(1, 2)))
         ])
         transformers.append(('text', text_transformer, [text_cols[0]]))

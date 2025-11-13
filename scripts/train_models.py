@@ -161,15 +161,13 @@ def main():
     }
     
     model_path = models_dir / "final_model.pkl"
-    with open(model_path, 'wb') as f:
-        pickle.dump(best_model_data, f)
+    joblib.dump(best_model_data, model_path)
     
     print(f"\n✓ Model saved: {model_path}")
     
     # Save full results
     results_path = models_dir / "model_results.pkl"
-    with open(results_path, 'wb') as f:
-        pickle.dump(model_results, f)
+    joblib.dump(model_results, results_path)
     
     print(f"✓ Full results saved: {results_path}")
     
