@@ -8,13 +8,15 @@ Deployed on Hugging Face Spaces.
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from datetime import datetime, timedelta
-import cloudpickle as pickle  # Back to cloudpickle as requested
+import pickle
 import sys
 from pathlib import Path
 import warnings
+import requests
+from typing import Optional
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -47,32 +49,111 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: 700;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 1rem;
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+    
+    * {
+        font-family: 'Poppins', sans-serif;
     }
+    
+    .main-header {
+        font-size: 3.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        margin-bottom: 0.5rem;
+        animation: fadeInDown 1s ease-in;
+    }
+    
     .sub-header {
-        font-size: 1.5rem;
-        color: #555;
+        font-size: 1.3rem;
+        color: #666;
         text-align: center;
         margin-bottom: 2rem;
+        animation: fadeInUp 1s ease-in;
     }
+    
     .metric-card {
-        background-color: #f0f2f6;
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        transition: transform 0.3s ease;
     }
+    
+    .metric-card:hover {
+        transform: translateY(-5px);
+    }
+    
     .forecast-box {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 2rem;
-        border-radius: 15px;
-        margin: 1rem 0;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        padding: 1.5rem;
+        border-radius: 20px;
+        margin: 0.5rem 0;
+        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        transition: all 0.3s ease;
+        text-align: center;
+    }
+    
+    .forecast-box:hover {
+        transform: translateY(-10px) scale(1.05);
+        box-shadow: 0 12px 30px rgba(102, 126, 234, 0.6);
+    }
+    
+    .weather-icon {
+        font-size: 3rem;
+        animation: bounce 2s infinite;
+    }
+    
+    @keyframes fadeInDown {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    @keyframes bounce {
+        0%, 100% {
+            transform: translateY(0);
+        }
+        50% {
+            transform: translateY(-10px);
+        }
+    }
+    
+    .stMetric {
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    
+    .api-badge {
+        display: inline-block;
+        background: #4CAF50;
+        color: white;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-left: 0.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -90,8 +171,15 @@ def load_model():
             st.info("Please train the model first: python scripts/train_models.py")
             return None
         
+        # Try multiple pickle libraries
         with open(model_path, 'rb') as f:
-            model_data = pickle.load(f)
+            try:
+                import cloudpickle
+                model_data = cloudpickle.load(f)
+            except ImportError:
+                # Fallback to standard pickle
+                import pickle as pkl
+                model_data = pkl.load(f)
         return model_data
     except Exception as e:
         st.error(f"Error loading model: {e}")
@@ -100,11 +188,97 @@ def load_model():
         return None
 
 # ============================================================
+# API CONFIGURATION
+# ============================================================
+API_KEY = "H2VGPX5BLW8B7CM3KYWKFSSAV"
+API_BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
+LOCATION = "ho chi minh"
+
+# ============================================================
 # DATA FETCHING
 # ============================================================
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
+def fetch_api_weather_data(days_back: int = 90) -> Optional[pd.DataFrame]:
+    """Fetch latest weather data from Visual Crossing API.
+    
+    Parameters:
+    -----------
+    days_back : int
+        Number of days of historical data to fetch
+    
+    Returns:
+    --------
+    DataFrame with weather data or None if error
+    """
+    try:
+        # Calculate date range
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Build API URL
+        url = f"{API_BASE_URL}/{LOCATION}/{start_date}/{end_date}"
+        params = {
+            'unitGroup': 'metric',
+            'key': API_KEY,
+            'contentType': 'json',
+            'include': 'days'
+        }
+        
+        # Make API request
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Extract daily data
+        if 'days' not in data:
+            st.error("No daily data found in API response")
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(data['days'])
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.sort_values('datetime').reset_index(drop=True)
+        
+        # Fix list columns - convert to strings or take first element
+        for col in df.columns:
+            if df[col].dtype == object:
+                # Check if column contains lists
+                sample = df[col].iloc[0] if len(df) > 0 else None
+                if isinstance(sample, list):
+                    # Convert list to comma-separated string or take first element
+                    if col == 'preciptype':
+                        df[col] = df[col].apply(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else 'none')
+                    else:
+                        df[col] = df[col].apply(lambda x: ','.join(map(str, x)) if isinstance(x, list) else str(x))
+        
+        return df
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {e}")
+        return None
+    except Exception as e:
+        st.error(f"Error processing API data: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+        return None
+
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def fetch_weather_data():
-    """Fetch latest weather data."""
+def fetch_weather_data(use_api: bool = True):
+    """Fetch weather data from API or local file.
+    
+    Parameters:
+    -----------
+    use_api : bool
+        If True, fetch from API. Otherwise, use local file.
+    """
+    if use_api:
+        df = fetch_api_weather_data(days_back=120)  # Fetch 4 months of data
+        if df is not None:
+            return df
+        st.warning("Falling back to local data file...")
+    
+    # Fallback to local file
     try:
         if not Path(DATA_PATH_DAILY).exists():
             st.error(f"Data file not found: {DATA_PATH_DAILY}")
@@ -141,6 +315,30 @@ def prepare_features_for_prediction(df, model_config):
         Engineered features ready for prediction
     """
     try:
+        # Make a copy to avoid modifying cached data
+        df = df.copy()
+        
+        # Fix all list columns before processing
+        for col in df.columns:
+            if df[col].dtype == object:
+                # Convert any lists to strings
+                df[col] = df[col].apply(lambda x: 
+                    x[0] if isinstance(x, list) and len(x) > 0 
+                    else ('none' if isinstance(x, list) else x)
+                )
+        
+        # Add missing columns that might not be in API response
+        missing_cols = ['windspeedmax', 'windspeedmean', 'windspeedmin', 'sealevelpressure']
+        for col in missing_cols:
+            if col not in df.columns:
+                if 'windspeed' in col:
+                    # Derive from windspeed if available
+                    if 'windspeed' in df.columns:
+                        df[col] = df['windspeed']
+                elif col == 'sealevelpressure':
+                    # Use default pressure if not available
+                    df[col] = 1013.25  # Standard atmospheric pressure
+        
         # Use the same feature engineering as training
         feature_df, target_df, target_cols, _ = prepare_supervised_dataset(
             df,
@@ -152,6 +350,13 @@ def prepare_features_for_prediction(df, model_config):
         
         # Take the last row (most recent)
         features = feature_df.drop(columns=['datetime']).iloc[[-1]]
+        
+        # Final check: ensure no lists remain in features
+        for col in features.columns:
+            if features[col].dtype == object:
+                features[col] = features[col].apply(lambda x: 
+                    str(x) if not isinstance(x, (int, float)) else x
+                )
         
         return features
         
@@ -167,7 +372,7 @@ def prepare_features_for_prediction(df, model_config):
 def main():
     # Header
     st.markdown('<div class="main-header">🌤️ Vietnam Weather Forecast</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">AI-Powered 5-Day Temperature Prediction for Hanoi</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">AI-Powered 5-Day Temperature Prediction for Ho Chi Minh City <span class="api-badge">🔴 LIVE DATA</span></div>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
@@ -181,22 +386,39 @@ def main():
         **Model:** Ensemble (BayesianRidge + HGB)  
         **Forecast Horizon:** 5 days  
         **Training Data:** 2015-2025  
-        **Accuracy:** RMSE < 0.8°C
+        **Accuracy:** RMSE < 0.8°C  
+        **Data Source:** Visual Crossing API 🔴 LIVE
         """)
         
         st.markdown("---")
         st.markdown("### 📍 Location")
-        st.write("**City:** Hanoi, Vietnam")
-        st.write("**Coordinates:** 21.0285° N, 105.8542° E")
+        st.write("**City:** Ho Chi Minh City, Vietnam")
+        st.write("**Coordinates:** 10.8231° N, 106.6297° E")
         
         st.markdown("---")
+        use_api = st.checkbox("Use Live API Data", value=True)
+        st.caption("⚡ Real-time data from Visual Crossing")
+        
+        if st.button("🔄 Refresh Data"):
+            st.cache_data.clear()
+            st.rerun()
+        
+        st.markdown("---")
+        st.markdown("### 📊 Display Options")
         show_historical = st.checkbox("Show Historical Data", value=True)
         show_metrics = st.checkbox("Show Model Metrics", value=True)
+        
+        st.markdown("---")
+        st.markdown("### 📐 Chart Settings")
+        chart_width = st.slider("Chart Width", min_value=8, max_value=16, value=12, step=1)
+        chart_height = st.slider("Chart Height", min_value=4, max_value=10, value=6, step=1)
+        width_mode = st.radio("Chart Display Mode", ["Fixed Size", "Full Width"], index=0)
+        pyplot_width = 'stretch' if width_mode == "Full Width" else 'content'
     
     # Load model and data
-    with st.spinner("Loading model and data..."):
+    with st.spinner("🔄 Loading model and fetching real-time weather data..."):
         model_data = load_model()
-        df = fetch_weather_data()
+        df = fetch_weather_data(use_api=use_api)
     
     if model_data is None or df is None:
         st.error("Failed to load model or data. Please check configuration.")
@@ -213,22 +435,27 @@ def main():
     config = model_data.get('config', {})
     
     # Current weather
-    st.markdown("## 📅 Current Weather")
     latest = df.iloc[-1]
+    latest_date = latest['datetime'].strftime("%B %d, %Y")
     
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown(f"## 📅 Current Weather - {latest_date}")
+    st.caption(f"🕐 Last updated: {datetime.now().strftime('%I:%M %p')}")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
+        temp_change = latest['temp'] - df.iloc[-2]['temp']
         st.metric(
             "🌡️ Temperature",
             f"{latest['temp']:.1f}°C",
-            f"{latest['temp'] - df.iloc[-2]['temp']:.1f}°C"
+            f"{temp_change:+.1f}°C"
         )
     
     with col2:
         st.metric(
             "💧 Humidity",
-            f"{latest['humidity']:.0f}%"
+            f"{latest['humidity']:.0f}%",
+            f"{latest['humidity'] - df.iloc[-2]['humidity']:+.0f}%"
         )
     
     with col3:
@@ -242,6 +469,18 @@ def main():
             "☁️ Cloud Cover",
             f"{latest['cloudcover']:.0f}%"
         )
+    
+    with col5:
+        if 'precip' in latest and latest['precip'] > 0:
+            st.metric(
+                "🌧️ Precipitation",
+                f"{latest['precip']:.1f} mm"
+            )
+        else:
+            st.metric(
+                "☀️ Conditions",
+                "Clear"
+            )
     
     st.markdown("---")
     
@@ -272,26 +511,43 @@ def main():
                     day_name = date.strftime("%a")
                     date_str = date.strftime("%b %d")
                     
-                    # Determine icon based on temperature
+                    # Determine icon and description based on temperature
                     if temp < 20:
                         icon = "🌤️"
-                    elif temp < 28:
+                        condition = "Cool"
+                    elif temp < 25:
                         icon = "☀️"
+                        condition = "Pleasant"
+                    elif temp < 30:
+                        icon = "🌞"
+                        condition = "Warm"
                     else:
-                        icon = "🌡️"
+                        icon = "🔥"
+                        condition = "Hot"
+                    
+                    # Add gradient based on temperature
+                    if temp < 25:
+                        gradient = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                    elif temp < 30:
+                        gradient = "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
+                    else:
+                        gradient = "linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)"
                     
                     st.markdown(f"""
-                    <div class="forecast-box">
-                        <h3 style="text-align: center; margin: 0;">{icon}</h3>
-                        <p style="text-align: center; font-size: 1.2rem; margin: 0.5rem 0;">
+                    <div class="forecast-box" style="background: {gradient};">
+                        <div class="weather-icon">{icon}</div>
+                        <p style="font-size: 1.3rem; font-weight: 600; margin: 0.5rem 0;">
                             {day_name}
                         </p>
-                        <p style="text-align: center; font-size: 0.9rem; margin: 0;">
+                        <p style="font-size: 0.85rem; opacity: 0.9; margin: 0;">
                             {date_str}
                         </p>
-                        <h2 style="text-align: center; margin: 1rem 0;">
+                        <h2 style="margin: 0.8rem 0; font-size: 2rem;">
                             {temp:.1f}°C
                         </h2>
+                        <p style="font-size: 0.9rem; opacity: 0.9; margin: 0;">
+                            {condition}
+                        </p>
                     </div>
                     """, unsafe_allow_html=True)
             
@@ -302,37 +558,34 @@ def main():
             hist_dates = df['datetime'].tail(14).tolist()
             hist_temps = df['temp'].tail(14).tolist()
             
-            fig = go.Figure()
+            # Create matplotlib figure with custom size
+            fig, ax = plt.subplots(figsize=(chart_width, chart_height))
             
             # Historical data
-            fig.add_trace(go.Scatter(
-                x=hist_dates,
-                y=hist_temps,
-                mode='lines+markers',
-                name='Historical',
-                line=dict(color='#1f77b4', width=2),
-                marker=dict(size=6)
-            ))
+            ax.plot(hist_dates, hist_temps, 
+                   color='#1f77b4', linewidth=2, 
+                   marker='o', markersize=6, 
+                   label='Historical', zorder=2)
             
             # Forecast data
-            fig.add_trace(go.Scatter(
-                x=forecast_dates,
-                y=predictions,
-                mode='lines+markers',
-                name='Forecast',
-                line=dict(color='#ff7f0e', width=2, dash='dash'),
-                marker=dict(size=8, symbol='star')
-            ))
+            ax.plot(forecast_dates, predictions, 
+                   color='#ff7f0e', linewidth=2, 
+                   linestyle='--', marker='*', markersize=10, 
+                   label='Forecast', zorder=2)
             
-            fig.update_layout(
-                title="14-Day Historical + 5-Day Forecast",
-                xaxis_title="Date",
-                yaxis_title="Temperature (°C)",
-                hovermode='x unified',
-                height=400
-            )
+            # Styling
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Temperature (°C)', fontsize=12, fontweight='bold')
+            ax.set_title('14-Day Historical + 5-Day Forecast', fontsize=14, fontweight='bold', pad=20)
+            ax.legend(loc='best', fontsize=10)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.pyplot(fig, width=pyplot_width)
+            plt.close(fig)
             
         except Exception as e:
             st.error(f"Error generating forecast: {e}")
@@ -367,15 +620,18 @@ def main():
         filtered_df = df.loc[mask]
         
         # Plot
-        fig = px.line(
-            filtered_df,
-            x='datetime',
-            y='temp',
-            title="Historical Temperature",
-            labels={'datetime': 'Date', 'temp': 'Temperature (°C)'}
-        )
-        fig.update_traces(line_color='#1f77b4', line_width=2)
-        st.plotly_chart(fig, use_container_width=True)
+        fig, ax = plt.subplots(figsize=(chart_width, chart_height))
+        ax.plot(filtered_df['datetime'], filtered_df['temp'], 
+               color='#1f77b4', linewidth=2)
+        ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Temperature (°C)', fontsize=12, fontweight='bold')
+        ax.set_title('Historical Temperature', fontsize=14, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        st.pyplot(fig, width=pyplot_width)
+        plt.close(fig)
         
         # Statistics
         col1, col2, col3 = st.columns(3)
@@ -405,11 +661,12 @@ def main():
     # Footer
     st.markdown("---")
     st.markdown("""
-    <div style="text-align: center; color: #888;">
-        <p>Built with ❤️ using Streamlit | Data from Visual Crossing Weather API</p>
-        <p>© 2025 Weather Forecast App | Last updated: {}</p>
+    <div style="text-align: center; color: #888; padding: 2rem 0;">
+        <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">Built with ❤️ using Streamlit | Powered by Visual Crossing Weather API</p>
+        <p style="font-size: 0.9rem;">© 2025 Weather Forecast App | Last updated: {}</p>
+        <p style="font-size: 0.8rem; margin-top: 1rem;">🌍 Ho Chi Minh City, Vietnam | 🔴 Real-time Data</p>
     </div>
-    """.format(datetime.now().strftime("%Y-%m-%d %H:%M")), unsafe_allow_html=True)
+    """.format(datetime.now().strftime("%B %d, %Y at %I:%M %p")), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

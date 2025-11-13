@@ -25,12 +25,16 @@ skl2onnx==1.15.0
 # Streamlit App
 streamlit==1.25.0
 
+# API Requests
+requests==2.31.0
+
 # Progress Bars
 tqdm==4.65.0
 
 # Utilities
 pyyaml==6.0.1
 python-dotenv==1.0.0
+cloudpickle==2.2.1
 
 # Testing
 pytest==7.4.0
