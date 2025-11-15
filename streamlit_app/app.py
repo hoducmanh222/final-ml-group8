@@ -183,9 +183,24 @@ def load_model():
 # ============================================================
 # API CONFIGURATION
 # ============================================================
-API_KEY = "H2VGPX5BLW8B7CM3KYWKFSSAV"
+# Multiple API keys for rotation to prevent rate limiting
+API_KEYS = [
+    "H2VGPX5BLW8B7CM3KYWKFSSAV",
+    "LHXYADC5P5YBQU6N78MB77J6N",
+    "NKS2UDLBW3LZEC2UME4YR6FS9",
+    "SKG826LA8K5SX9BERSB2MD5QL"
+]
 API_BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 LOCATION = "ho chi minh"
+
+# API key rotation index
+if 'api_key_index' not in st.session_state:
+    st.session_state.api_key_index = 0
+
+def get_next_api_key():
+    """Rotate to next API key."""
+    st.session_state.api_key_index = (st.session_state.api_key_index + 1) % len(API_KEYS)
+    return API_KEYS[st.session_state.api_key_index]
 
 # ============================================================
 # DATA FETCHING
@@ -210,16 +225,28 @@ def fetch_api_weather_data(days_back: int = 90) -> Optional[pd.DataFrame]:
         
         # Build API URL
         url = f"{API_BASE_URL}/{LOCATION}/{start_date}/{end_date}"
-        params = {
-            'unitGroup': 'metric',
-            'key': API_KEY,
-            'contentType': 'json',
-            'include': 'days'
-        }
         
-        # Make API request
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        # Try API keys until one works
+        last_error = None
+        for attempt in range(len(API_KEYS)):
+            current_key = API_KEYS[st.session_state.api_key_index]
+            params = {
+                'unitGroup': 'metric',
+                'key': current_key,
+                'contentType': 'json',
+                'include': 'days'
+            }
+            
+            try:
+                # Make API request
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                break  # Success, exit loop
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                get_next_api_key()  # Try next key
+                if attempt == len(API_KEYS) - 1:
+                    raise last_error  # All keys failed
         
         data = response.json()
         
@@ -367,46 +394,58 @@ def main():
     st.markdown('<div class="main-header">🌤️ Vietnam Weather Forecast</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered 5-Day Temperature Prediction for Ho Chi Minh City <span class="api-badge">🔴 LIVE DATA</span></div>', unsafe_allow_html=True)
     
-    # Sidebar
+    # Sidebar with tabs
     with st.sidebar:
         st.image("https://raw.githubusercontent.com/hoducmanh222/temp_holder/main/vietnam_flag.png", 
                 width=100)
         st.title("⚙️ Settings")
         
-        st.markdown("---")
-        st.markdown("### 📊 Model Information")
-        st.info("""
-        **Model:** Ensemble (BayesianRidge + HGB)  
-        **Forecast Horizon:** 5 days  
-        **Training Data:** 2015-2025  
-        **Accuracy:** RMSE < 0.8°C  
-        **Data Source:** Visual Crossing API 🔴 LIVE
-        """)
+        # Create tabs in sidebar
+        tab1, tab2, tab3, tab4 = st.tabs(["ℹ️ Info", "⚙️ Data", "📊 Display", "📐 Charts"])
         
-        st.markdown("---")
-        st.markdown("### 📍 Location")
-        st.write("**City:** Ho Chi Minh City, Vietnam")
-        st.write("**Coordinates:** 10.8231° N, 106.6297° E")
+        with tab1:
+            st.markdown("### 📊 Model Information")
+            st.info("""
+            **Model:** Ensemble (BayesianRidge + HGB)  
+            **Forecast Horizon:** 5 days  
+            **Training Data:** 2015-2025  
+            **Accuracy:** RMSE < 0.8°C  
+            **Data Source:** Visual Crossing API 🔴 LIVE
+            """)
+            
+            st.markdown("### 📍 Location")
+            st.write("**City:** Ho Chi Minh City, Vietnam")
+            st.write("**Coordinates:** 10.8231° N, 106.6297° E")
+            
+            st.markdown("### 🔑 API Status")
+            st.write(f"**Active Key:** #{st.session_state.api_key_index + 1} of {len(API_KEYS)}")
         
-        st.markdown("---")
-        use_api = st.checkbox("Use Live API Data", value=True)
-        st.caption("⚡ Real-time data from Visual Crossing")
+        with tab2:
+            st.markdown("### 🌐 Data Source")
+            use_api = st.checkbox("Use Live API Data", value=True)
+            st.caption("⚡ Real-time data from Visual Crossing")
+            
+            if st.button("🔄 Refresh Data"):
+                st.cache_data.clear()
+                st.rerun()
+            
+            if st.button("🔄 Rotate API Key"):
+                get_next_api_key()
+                st.cache_data.clear()
+                st.success(f"Switched to API Key #{st.session_state.api_key_index + 1}")
+                st.rerun()
         
-        if st.button("🔄 Refresh Data"):
-            st.cache_data.clear()
-            st.rerun()
+        with tab3:
+            st.markdown("### 📊 Display Options")
+            show_forecast = st.checkbox("Show 5-Day Forecast", value=True)
+            show_historical = st.checkbox("Show Historical Data", value=True)
+            show_pred_vs_actual = st.checkbox("Show Predicted vs Actual", value=True)
+            show_metrics = st.checkbox("Show Model Metrics", value=True)
         
-        st.markdown("---")
-        st.markdown("### 📊 Display Options")
-        show_historical = st.checkbox("Show Historical Data", value=True)
-        show_metrics = st.checkbox("Show Model Metrics", value=True)
-        
-        st.markdown("---")
-        st.markdown("### 📐 Chart Settings")
-        chart_width = st.slider("Chart Width", min_value=8, max_value=16, value=12, step=1)
-        chart_height = st.slider("Chart Height", min_value=4, max_value=10, value=6, step=1)
-        width_mode = st.radio("Chart Display Mode", ["Fixed Size", "Full Width"], index=0)
-        pyplot_width = 'stretch' if width_mode == "Full Width" else 'content'
+        with tab4:
+            st.markdown("### 📐 Chart Settings")
+            chart_width = st.slider("Chart Width", min_value=8, max_value=16, value=12, step=1)
+            chart_height = st.slider("Chart Height", min_value=4, max_value=10, value=6, step=1)
     
     # Load model and data
     with st.spinner("🔄 Loading model and fetching real-time weather data..."):
@@ -478,112 +517,113 @@ def main():
     st.markdown("---")
     
     # Forecast
-    st.markdown("## 🔮 5-Day Forecast")
-    
-    with st.spinner("Generating forecast..."):
-        try:
-            # Prepare features using the same method as training
-            features = prepare_features_for_prediction(df, config)
-            
-            if features is None:
-                st.error("Failed to prepare features for prediction")
-                return
-            
-            # Make prediction
-            predictions = model.predict(features)[0]
-            
-            # Create forecast dates
-            last_date = df['datetime'].iloc[-1]
-            forecast_dates = [last_date + timedelta(days=i+1) for i in range(5)]
-            
-            # Display forecast
-            forecast_cols = st.columns(5)
-            
-            for i, (date, temp) in enumerate(zip(forecast_dates, predictions)):
-                with forecast_cols[i]:
-                    day_name = date.strftime("%a")
-                    date_str = date.strftime("%b %d")
-                    
-                    # Determine icon and description based on temperature
-                    if temp < 20:
-                        icon = "🌤️"
-                        condition = "Cool"
-                    elif temp < 25:
-                        icon = "☀️"
-                        condition = "Pleasant"
-                    elif temp < 30:
-                        icon = "🌞"
-                        condition = "Warm"
-                    else:
-                        icon = "🔥"
-                        condition = "Hot"
-                    
-                    # Add gradient based on temperature
-                    if temp < 25:
-                        gradient = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                    elif temp < 30:
-                        gradient = "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
-                    else:
-                        gradient = "linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)"
-                    
-                    st.markdown(f"""
-                    <div class="forecast-box" style="background: {gradient};">
-                        <div class="weather-icon">{icon}</div>
-                        <p style="font-size: 1.3rem; font-weight: 600; margin: 0.5rem 0;">
-                            {day_name}
-                        </p>
-                        <p style="font-size: 0.85rem; opacity: 0.9; margin: 0;">
-                            {date_str}
-                        </p>
-                        <h2 style="margin: 0.8rem 0; font-size: 2rem;">
-                            {temp:.1f}°C
-                        </h2>
-                        <p style="font-size: 0.9rem; opacity: 0.9; margin: 0;">
-                            {condition}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # Forecast chart
-            st.markdown("### 📈 Temperature Trend")
-            
-            # Combine historical and forecast
-            hist_dates = df['datetime'].tail(14).tolist()
-            hist_temps = df['temp'].tail(14).tolist()
-            
-            # Create matplotlib figure with custom size
-            fig, ax = plt.subplots(figsize=(chart_width, chart_height))
-            
-            # Historical data
-            ax.plot(hist_dates, hist_temps, 
-                   color='#1f77b4', linewidth=2, 
-                   marker='o', markersize=6, 
-                   label='Historical', zorder=2)
-            
-            # Forecast data
-            ax.plot(forecast_dates, predictions, 
-                   color='#ff7f0e', linewidth=2, 
-                   linestyle='--', marker='*', markersize=10, 
-                   label='Forecast', zorder=2)
-            
-            # Styling
-            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Temperature (°C)', fontsize=12, fontweight='bold')
-            ax.set_title('14-Day Historical + 5-Day Forecast', fontsize=14, fontweight='bold', pad=20)
-            ax.legend(loc='best', fontsize=10)
-            ax.grid(True, alpha=0.3, linestyle='--')
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-            ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            
-            st.pyplot(fig, width=pyplot_width)
-            plt.close(fig)
-            
-        except Exception as e:
-            st.error(f"Error generating forecast: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+    if show_forecast:
+        st.markdown("## 🔮 5-Day Forecast")
+        
+        with st.spinner("Generating forecast..."):
+            try:
+                # Prepare features using the same method as training
+                features = prepare_features_for_prediction(df, config)
+                
+                if features is None:
+                    st.error("Failed to prepare features for prediction")
+                    return
+                
+                # Make prediction
+                predictions = model.predict(features)[0]
+                
+                # Create forecast dates
+                last_date = df['datetime'].iloc[-1]
+                forecast_dates = [last_date + timedelta(days=i+1) for i in range(5)]
+                
+                # Display forecast
+                forecast_cols = st.columns(5)
+                
+                for i, (date, temp) in enumerate(zip(forecast_dates, predictions)):
+                    with forecast_cols[i]:
+                        day_name = date.strftime("%a")
+                        date_str = date.strftime("%b %d")
+                        
+                        # Determine icon and description based on temperature
+                        if temp < 20:
+                            icon = "🌤️"
+                            condition = "Cool"
+                        elif temp < 25:
+                            icon = "☀️"
+                            condition = "Pleasant"
+                        elif temp < 30:
+                            icon = "🌞"
+                            condition = "Warm"
+                        else:
+                            icon = "🔥"
+                            condition = "Hot"
+                        
+                        # Add gradient based on temperature
+                        if temp < 25:
+                            gradient = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                        elif temp < 30:
+                            gradient = "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
+                        else:
+                            gradient = "linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)"
+                        
+                        st.markdown(f"""
+                        <div class="forecast-box" style="background: {gradient};">
+                            <div class="weather-icon">{icon}</div>
+                            <p style="font-size: 1.3rem; font-weight: 600; margin: 0.5rem 0;">
+                                {day_name}
+                            </p>
+                            <p style="font-size: 0.85rem; opacity: 0.9; margin: 0;">
+                                {date_str}
+                            </p>
+                            <h2 style="margin: 0.8rem 0; font-size: 2rem;">
+                                {temp:.1f}°C
+                            </h2>
+                            <p style="font-size: 0.9rem; opacity: 0.9; margin: 0;">
+                                {condition}
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                # Forecast chart
+                st.markdown("### 📈 Temperature Trend")
+                
+                # Combine historical and forecast
+                hist_dates = df['datetime'].tail(14).tolist()
+                hist_temps = df['temp'].tail(14).tolist()
+                
+                # Create matplotlib figure with custom size
+                fig, ax = plt.subplots(figsize=(chart_width, chart_height))
+                
+                # Historical data
+                ax.plot(hist_dates, hist_temps, 
+                       color='#1f77b4', linewidth=2, 
+                       marker='o', markersize=6, 
+                       label='Historical', zorder=2)
+                
+                # Forecast data
+                ax.plot(forecast_dates, predictions, 
+                       color='#ff7f0e', linewidth=2, 
+                       linestyle='--', marker='*', markersize=10, 
+                       label='Forecast', zorder=2)
+                
+                # Styling
+                ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+                ax.set_ylabel('Temperature (°C)', fontsize=12, fontweight='bold')
+                ax.set_title('14-Day Historical + 5-Day Forecast', fontsize=14, fontweight='bold', pad=20)
+                ax.legend(loc='best', fontsize=10)
+                ax.grid(True, alpha=0.3, linestyle='--')
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                st.pyplot(fig)
+                plt.close(fig)
+                
+            except Exception as e:
+                st.error(f"Error generating forecast: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     
     st.markdown("---")
     
@@ -623,7 +663,7 @@ def main():
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
-        st.pyplot(fig, width=pyplot_width)
+        st.pyplot(fig)
         plt.close(fig)
         
         # Statistics
@@ -634,6 +674,102 @@ def main():
             st.metric("Maximum", f"{filtered_df['temp'].max():.1f}°C")
         with col3:
             st.metric("Minimum", f"{filtered_df['temp'].min():.1f}°C")
+    
+    # Predicted vs Actual Plot
+    if show_pred_vs_actual and show_forecast:
+        st.markdown("---")
+        st.markdown("## 🎯 Model Validation: Predicted vs Actual")
+        st.caption("Comparing model predictions against actual historical temperatures")
+        
+        try:
+            # Use recent historical data for validation
+            validation_days = 30
+            validation_df = df.tail(validation_days).copy()
+            
+            # Generate predictions for validation period
+            pred_temps = []
+            actual_temps = validation_df['temp'].values
+            dates = validation_df['datetime'].values
+            
+            # Make predictions for each day
+            for i in range(len(validation_df) - 5):  # Need 5 days for forecast
+                hist_subset = df.iloc[:len(df)-validation_days+i]
+                features = prepare_features_for_prediction(hist_subset, config)
+                if features is not None:
+                    pred = model.predict(features)[0]
+                    pred_temps.append(pred[0])  # Take 1-day ahead prediction
+                else:
+                    pred_temps.append(np.nan)
+            
+            # Align arrays
+            pred_temps = np.array(pred_temps)
+            actual_temps_aligned = actual_temps[:len(pred_temps)]
+            dates_aligned = dates[:len(pred_temps)]
+            
+            # Create comparison plot
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(chart_width, chart_height))
+            
+            # Time series comparison
+            ax1.plot(dates_aligned, actual_temps_aligned, 
+                    color='#1f77b4', linewidth=2, marker='o', 
+                    markersize=4, label='Actual', alpha=0.7)
+            ax1.plot(dates_aligned, pred_temps, 
+                    color='#ff7f0e', linewidth=2, marker='s', 
+                    markersize=4, label='Predicted', alpha=0.7)
+            ax1.set_xlabel('Date', fontsize=11, fontweight='bold')
+            ax1.set_ylabel('Temperature (°C)', fontsize=11, fontweight='bold')
+            ax1.set_title('Actual vs Predicted Temperature', fontsize=13, fontweight='bold')
+            ax1.legend(loc='best')
+            ax1.grid(True, alpha=0.3)
+            ax1.tick_params(axis='x', rotation=45)
+            
+            # Scatter plot
+            ax2.scatter(actual_temps_aligned, pred_temps, 
+                       alpha=0.6, s=50, color='#2ca02c')
+            
+            # Perfect prediction line
+            min_temp = min(actual_temps_aligned.min(), pred_temps.min())
+            max_temp = max(actual_temps_aligned.max(), pred_temps.max())
+            ax2.plot([min_temp, max_temp], [min_temp, max_temp], 
+                    'r--', linewidth=2, label='Perfect Prediction')
+            
+            ax2.set_xlabel('Actual Temperature (°C)', fontsize=11, fontweight='bold')
+            ax2.set_ylabel('Predicted Temperature (°C)', fontsize=11, fontweight='bold')
+            ax2.set_title('Prediction Accuracy', fontsize=13, fontweight='bold')
+            ax2.legend(loc='best')
+            ax2.grid(True, alpha=0.3)
+            
+            # Add R² score
+            from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+            r2 = r2_score(actual_temps_aligned, pred_temps)
+            mae = mean_absolute_error(actual_temps_aligned, pred_temps)
+            rmse = np.sqrt(mean_squared_error(actual_temps_aligned, pred_temps))
+            
+            ax2.text(0.05, 0.95, f'R² = {r2:.3f}\nMAE = {mae:.2f}°C\nRMSE = {rmse:.2f}°C',
+                    transform=ax2.transAxes, fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # Validation metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("R² Score", f"{r2:.3f}")
+            with col2:
+                st.metric("MAE", f"{mae:.2f}°C")
+            with col3:
+                st.metric("RMSE", f"{rmse:.2f}°C")
+            with col4:
+                accuracy = 100 * (1 - mae / actual_temps_aligned.mean())
+                st.metric("Accuracy", f"{accuracy:.1f}%")
+                
+        except Exception as e:
+            st.error(f"Error creating validation plot: {e}")
+            import traceback
+            st.code(traceback.format_exc())
     
     # Model metrics
     if show_metrics and metrics:
