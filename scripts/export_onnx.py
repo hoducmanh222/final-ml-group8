@@ -2,7 +2,7 @@
 
 import sys
 import os
-import cloudpickle as pickle  # Changed this line
+import joblib
 import time
 import numpy as np
 import pandas as pd
@@ -37,8 +37,7 @@ def export_model_to_onnx(model_path, output_path, X_sample, model_name="model"):
     
     # Load pickle model
     print("Loading pickle model...")
-    with open(model_path, 'rb') as f:
-        model_data = pickle.load(f)
+    model_data = joblib.load(model_path)
     
     if isinstance(model_data, dict):
         pipeline = model_data.get('pipeline') or model_data.get('model')
@@ -123,8 +122,7 @@ def benchmark_models(
     print(f"{'='*80}")
     
     # Load pickle model
-    with open(pickle_path, 'rb') as f:
-        model_data = pickle.load(f)
+    model_data = joblib.load(pickle_path)
     
     if isinstance(model_data, dict):
         pickle_model = model_data.get('pipeline') or model_data.get('model')
@@ -215,6 +213,8 @@ def main():
     print("\n" + "="*80)
     print("MODEL EXPORT TO ONNX")
     print("="*80)
+    print(f"Python version: {sys.version}")
+    print(f"Working directory: {os.getcwd()}")
     
     # Paths
     models_dir = Path(__file__).parent.parent / "models"
