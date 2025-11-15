@@ -99,14 +99,6 @@ python scripts/export_onnx.py
 python scripts/run_retraining.py
 ```
 
-## 📊 Model Performance
-
-| Model | RMSE (°C) | MAE (°C) | R² Score |
-|-------|-----------|----------|----------|
-| BayesianRidge | 0.8234 | 0.6512 | 0.9123 |
-| HistGradientBoosting (Optuna) | 0.7891 | 0.6234 | 0.9234 |
-| **Ensemble (Final)** | **0.7456** | **0.5923** | **0.9345** |
-
 ## 🎯 Key Components
 
 ### 1. Data Processing
@@ -167,21 +159,6 @@ The final results notebook (`notebooks/04_final_results.ipynb`) includes:
 - Visualizations for all steps
 - Retraining simulation results
 - ONNX benchmark comparisons
-
-## 🌐 Deployment
-
-### Hugging Face Spaces
-
-```bash
-# 1. Create a new Space on Hugging Face
-# 2. Push code to the Space repository
-git remote add hf https://huggingface.co/spaces/<username>/<space-name>
-git push hf main
-
-# 3. Add requirements.txt to the Space
-# 4. Set app_file to streamlit_app/app.py
-# 5. The app will auto-deploy
-```
 
 ## 🤝 Contributing
 
